@@ -11,11 +11,13 @@ module PgHero
       before_action :set_database
       before_action :set_query_stats_enabled
       before_action :set_show_details, only: [:index, :queries, :show_query]
+      before_action :ensure_query_stats, only: [:queries]
     else
       # no need to check API in earlier versions
       before_filter :set_database
       before_filter :set_query_stats_enabled
       before_filter :set_show_details, only: [:index, :queries, :show_query]
+      before_filter :ensure_query_stats, only: [:queries]
     end
 
     def index
@@ -24,7 +26,7 @@ module PgHero
 
       if @replica
         @replication_lag = @database.replication_lag
-        @good_replication_lag = @replication_lag < 5
+        @good_replication_lag = @replication_lag ? @replication_lag < 5 : true
       else
         @inactive_replication_slots = @database.replication_slots.select { |r| !r[:active] }
       end
@@ -36,15 +38,9 @@ module PgHero
 
       @transaction_id_danger = @database.transaction_id_danger(threshold: 1500000000)
 
-      begin
-        @sequence_danger = @database.sequence_danger(threshold: (params[:sequence_threshold] || 0.9).to_f)
-      rescue ActiveRecord::StatementInvalid => e
-        if (m = /permission denied for [^:]+/.match(e.message))
-          @sequence_danger_error = m[0]
-        else
-          raise
-        end
-      end
+      @readable_sequences, @unreadable_sequences = @database.sequences.partition { |s| s[:readable] }
+
+      @sequence_danger = @database.sequence_danger(threshold: (params[:sequence_threshold] || 0.9).to_f, sequences: @readable_sequences)
 
       @indexes = @database.indexes
       @invalid_indexes = @indexes.select { |i| !i[:valid] }
@@ -111,7 +107,8 @@ module PgHero
 
     def live_queries
       @title = "Live Queries"
-      @running_queries = @database.running_queries
+      @running_queries = @database.running_queries(all: true)
+      @vacuum_progress = @database.vacuum_progress.index_by { |q| q[:pid] }
     end
 
     def queries
@@ -199,6 +196,8 @@ module PgHero
 
       if @duration / @period > 1440
         render_text "Too many data points"
+      elsif @period % 60 != 0
+        render_text "Period must be a multiple of 60"
       end
     end
 
@@ -248,6 +247,10 @@ module PgHero
           @visualize = params[:commit] == "Visualize"
         rescue ActiveRecord::StatementInvalid => e
           @error = e.message
+
+          if @error.include?("bind message supplies 0 parameters")
+            @error = "Can't explain queries with bind parameters"
+          end
         end
       end
     end
@@ -383,6 +386,12 @@ module PgHero
         render plain: message
       else
         render text: message
+      end
+    end
+
+    def ensure_query_stats
+      unless @query_stats_enabled
+        redirect_to root_path, alert: "Query stats not enabled"
       end
     end
   end

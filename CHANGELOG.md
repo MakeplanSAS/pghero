@@ -1,7 +1,28 @@
-## 2.0.7 [unreleased]
+## 2.1.1 [unreleased]
 
+- Added `explain_timeout_sec` option
+- Fixed error with unparsable sequences
+
+## 2.1.0
+
+- Fixed issue with sequences in different schema than table
+- No longer throw errors for unreadable sequences
+- Fixed replication lag for Amazon Aurora
+- Added `vacuum_progress` method
+
+## 2.0.8
+
+- Added support for Postgres 10 replicas
+- Added support for pg_query 1.0.0
+- Show queries with insufficient privilege on live queries page
+- Default to table schema for sequences
+
+## 2.0.7
+
+- Fixed issue with sequences in different schema than table
 - Fixed query details when multiple users have same query hash
 - Fixed error with invalid indexes in non-public schema
+- Raise error when capture query stats fails
 
 ## 2.0.6
 

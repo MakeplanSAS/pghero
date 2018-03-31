@@ -1,12 +1,16 @@
 <div id="status">
   <% if @replica %>
     <div class="alert alert-<%= @good_replication_lag ? "success" : "warning" %>">
-      <% if @good_replication_lag %>
-        Healthy replication lag
+      <% if @replication_lag %>
+        <% if @good_replication_lag %>
+          Healthy replication lag
+        <% else %>
+          High replication lag
+        <% end %>
+        <span class="tiny"><%= number_with_delimiter((@replication_lag * 1000).round) %> ms</span>
       <% else %>
-        High replication lag
+        Replication lag not supported
       <% end %>
-      <span class="tiny"><%= number_with_delimiter((@replication_lag * 1000).round) %> ms</span>
     </div>
   <% elsif @inactive_replication_slots.any? %>
     <div class="alert alert-warning">
@@ -48,12 +52,13 @@
     <% end %>
   </div>
   <div class="alert alert-<%= @sequence_danger && @sequence_danger.empty? ? "success" : "warning" %>">
-    <% if !@sequence_danger %>
-      Error checking for columns near integer overflow: <%= @sequence_danger_error %>
-    <% elsif @sequence_danger.any? %>
-      <%= pluralize(@sequence_danger.size, "columns") %> approaching overflow
+    <% if @sequence_danger.any? %>
+      <%= pluralize(@sequence_danger.size, "column") %> approaching overflow
     <% else %>
       No columns near integer overflow
+    <% end %>
+    <% if @unreadable_sequences.any? %>
+      (<%= link_to pluralize(@unreadable_sequences.size, "unreadable sequence", "unreadable sequences"), {unreadable: "t"} %>)
     <% end %>
   </div>
   <div class="alert alert-<%= @invalid_indexes.empty? ? "success" : "warning" %>">
@@ -101,6 +106,45 @@
   <% end %>
 </div>
 
+<% if params[:unreadable] && @unreadable_sequences.any? %>
+  <div class="content">
+    <h1>Unreadable Sequences</h1>
+
+    <p>This is likely due to missing privileges. Make sure your user has the SELECT privilege for each sequence.</p>
+
+    <table class="table">
+      <thead>
+        <tr>
+          <th style="width: 33%;">Column</th>
+          <th>Sequence</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @unreadable_sequences.each do |sequence| %>
+          <tr>
+            <td>
+              <%= sequence[:table] %>.<%= sequence[:column] %>
+              <% if sequence[:table_schema] != "public" %>
+                <span class="text-muted"><%= sequence[:table_schema] %></span>
+              <% end %>
+            </td>
+            <td>
+              <% if sequence[:sequence] %>
+                <%= sequence[:sequence] %>
+                <% if sequence[:schema] && sequence[:schema] != "public" %>
+                  <span class="text-muted"><%= sequence[:schema] %></span>
+                <% end %>
+              <% else %>
+                Unable to parse: <%= sequence[:default_value] %>
+              <% end %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+<% end %>
+
 <% if @replica && !@good_replication_lag %>
   <div class="content">
     <h1>High Replication Lag</h1>
@@ -141,7 +185,7 @@
 
     <pre><code>ALTER ROLE &lt;user&gt; SET statement_timeout TO '60s';</code></pre>
 
-    <%= render partial: "live_queries_table", locals: {queries: @long_running_queries} %>
+    <%= render partial: "live_queries_table", locals: {queries: @long_running_queries, vacuum_progress: {}} %>
   </div>
 <% end %>
 
@@ -224,6 +268,9 @@
           <tr>
             <td>
               <%= query[:table] %>.<%= query[:column] %>
+              <% if query[:table_schema] != "public" %>
+                <span class="text-muted"><%= query[:table_schema] %></span>
+              <% end %>
             </td>
             <td>
               <%= query[:column_type] %>
